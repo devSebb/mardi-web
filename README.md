@@ -1,36 +1,40 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# MARDI — landing page
 
-## Getting Started
+The public landing page for [MARDI](https://github.com/devSebb/MARDI), a retro-futuristic macOS second-brain companion.
 
-First, run the development server:
+Live at **[project-mardi.com](https://project-mardi.com)**.
+
+## Stack
+
+- Next.js 16 · React 19 · TypeScript · Tailwind v4 (Turbopack)
+- Self-hosted **Departure Mono** (OFL, Helena Zhang) for all type
+- A Canvas port of the app's `MardiFishBrailleView` — the fish is live, not a GIF
+
+## Develop
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
+npm run dev          # → http://localhost:5050
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Build
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+npm run build
+npm run start        # → http://localhost:5050
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Structure
 
-## Learn More
+- `app/` — root layout, page, OG image, sitemap, robots
+- `components/chrome/` — design primitives (AgentHeader, BrailleDivider, BrailleLabel, Panel, Wordmark)
+- `components/mardi/` — the character (BrailleFish) and the three procedural demos
+- `components/sections/` — Nav, Hero, Triptych, MemoryTypes, HowItWorks, UnderTheHood, Footer
+- `public/fonts/` — Departure Mono (woff2 + woff + OFL license)
+- `public/assets/MardiFish.png` — the source pixel map the Canvas samples every frame
 
-To learn more about Next.js, take a look at the following resources:
+## License
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Code: MIT (pending).
+Departure Mono: SIL OFL 1.1 — see `public/fonts/DepartureMono-LICENSE.txt`.
+Braille glyphs: © Unicode (U+2800–U+28FF).
