@@ -2,12 +2,14 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
 const SITE_URL = "https://project-mardi.com";
+const TITLE = "MARDI — a second brain that lives in the corner of your screen.";
+const DESCRIPTION =
+  "Local-first memory for your Mac. Save URLs, snippets, commands, and notes into a markdown vault you control.";
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
-  title: "MARDI — a second brain that lives in the corner of your screen.",
-  description:
-    "A retro-futuristic macOS companion. Pull your cursor to the corner and tell Mardi what to keep — URLs, snippets, SSH, prompts, signatures — auto-tagged into a plain-markdown vault. Local-first. Your keys, your data.",
+  title: TITLE,
+  description: DESCRIPTION,
   applicationName: "MARDI",
   authors: [{ name: "devSebb", url: "https://github.com/devSebb" }],
   creator: "devSebb",
@@ -23,18 +25,16 @@ export const metadata: Metadata = {
   },
   openGraph: {
     type: "website",
-    url: SITE_URL,
+    url: `${SITE_URL}/`,
     siteName: "MARDI",
-    title: "MARDI — a second brain that lives in the corner of your screen.",
-    description:
-      "Retro-futuristic macOS companion. Summon. Save. Recall. Obsidian-compatible markdown vault. Local-first.",
+    title: TITLE,
+    description: DESCRIPTION,
     locale: "en_US",
   },
   twitter: {
     card: "summary_large_image",
-    title: "MARDI",
-    description:
-      "A second brain that lives in the corner of your screen. Local-first. Obsidian-compatible.",
+    title: TITLE,
+    description: DESCRIPTION,
     creator: "@devSebb",
   },
   robots: {
