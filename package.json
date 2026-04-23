@@ -6,7 +6,8 @@
     "dev": "next dev -p 5050",
     "build": "next build",
     "start": "next start -p 5050",
-    "lint": "eslint"
+    "lint": "eslint",
+    "gen:fish-art": "node scripts/gen-fish-art.mjs"
   },
   "dependencies": {
     "next": "16.2.4",
@@ -20,6 +21,7 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.2.4",
+    "pngjs": "^7.0.0",
     "tailwindcss": "^4",
     "typescript": "^5"
   }
