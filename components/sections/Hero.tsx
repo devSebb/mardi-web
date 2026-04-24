@@ -1,24 +1,11 @@
 "use client";
 
-import { useState } from "react";
-import { BrailleFish, type MardiMood } from "../mardi/BrailleFish";
+import { Mardi } from "../mardi/Mardi";
 import { BrailleLabel } from "../chrome/BrailleLabel";
 import { Wordmark } from "../chrome/Wordmark";
 import { BrailleDivider } from "../chrome/BrailleDivider";
 
-const MOODS: { id: MardiMood; label: string; line: string }[] = [
-  { id: "idle",     label: "idle",     line: "Still here." },
-  { id: "summoned", label: "summoned", line: "Save something?" },
-  { id: "thinking", label: "thinking", line: "Thinking…" },
-  { id: "success",  label: "success",  line: "Got it. Saved." },
-  { id: "error",    label: "error",    line: "Hm. Something didn't work." },
-  { id: "sleeping", label: "sleeping", line: "Mm. Sleepy." },
-];
-
 export function Hero() {
-  const [mood, setMood] = useState<MardiMood>("idle");
-  const active = MOODS.find((m) => m.id === mood)!;
-
   return (
     <section className="relative mx-auto max-w-6xl px-5 sm:px-8 pt-12 sm:pt-20 pb-16">
       <div className="grid grid-cols-1 md:grid-cols-12 gap-10 md:gap-12 items-center">
@@ -86,46 +73,7 @@ export function Hero() {
 
         {/* ── Right: Mardi ──────────────────────────────────────── */}
         <div className="md:col-span-5">
-          <div className="relative mx-auto w-full max-w-[420px]">
-            <div className="relative aspect-square bg-ink-2 pixel-border braille-field-soft overflow-hidden">
-              <div className="absolute inset-0 flex items-center justify-center">
-                <BrailleFish mood={mood} size={360} cols={48} rows={24} />
-              </div>
-
-              {/* top chrome */}
-              <div className="absolute left-3 right-3 top-3 flex items-center justify-between text-[10px] track-wide uppercase text-bone-3 pointer-events-none">
-                <span>⣿⣿ mardi · fishbowl</span>
-                <span className={moodColorClass(mood)}>{mood}</span>
-              </div>
-
-              {/* bottom chrome */}
-              <div className="absolute left-3 right-3 bottom-3 pointer-events-none">
-                <BrailleDivider opacity={0.3} />
-                <p className="mt-2 text-[11px] text-bone-2">
-                  <span className={moodColorClass(mood)}>›</span>{" "}
-                  <span className="flicker">{active.line}</span>
-                </p>
-              </div>
-            </div>
-
-            <div className="mt-3 flex flex-wrap gap-1.5">
-              {MOODS.map((m) => (
-                <button
-                  key={m.id}
-                  type="button"
-                  onClick={() => setMood(m.id)}
-                  aria-pressed={mood === m.id}
-                  className={`px-2.5 py-1 text-[10px] track-wide uppercase pixel-border transition-colors ${
-                    mood === m.id
-                      ? "bg-pink/15 text-bone pixel-border-pink"
-                      : "text-bone-3 hover:text-bone"
-                  }`}
-                >
-                  {m.label}
-                </button>
-              ))}
-            </div>
-          </div>
+          <Mardi />
         </div>
       </div>
 
@@ -165,15 +113,4 @@ export function Hero() {
 
 function Beat({ children, pink }: { children: React.ReactNode; pink?: boolean }) {
   return <span className={pink ? "text-pink" : ""}>{children}</span>;
-}
-
-function moodColorClass(m: MardiMood) {
-  switch (m) {
-    case "idle":     return "text-bone";
-    case "summoned": return "text-pink";
-    case "thinking": return "text-gold";
-    case "success":  return "text-cyan";
-    case "error":    return "text-red";
-    case "sleeping": return "text-bone-3";
-  }
 }
