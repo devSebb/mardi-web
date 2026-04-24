@@ -27,11 +27,6 @@ type Props = {
   showCaption?: boolean;
   /** Hide the top chrome ("mardi · fishbowl"). */
   showChrome?: boolean;
-  /**
-   * Fish rendering size, in px, when not responsive. When `responsive` is
-   * true the fish fills the panel.
-   */
-  fishSize?: number;
   className?: string;
 };
 
@@ -48,7 +43,6 @@ export function Mardi({
   showSelector = true,
   showCaption = true,
   showChrome = true,
-  fishSize = 360,
   className = "",
 }: Props) {
   const [innerMood, setInnerMood] = useState<MardiMood>("idle");
@@ -85,8 +79,8 @@ export function Mardi({
   return (
     <div className={`relative mx-auto w-full max-w-[420px] ${className}`}>
       <div className="relative aspect-square bg-ink-2 pixel-border braille-field-soft overflow-hidden">
-        <div className="absolute inset-0 flex items-center justify-center p-2">
-          <BrailleFish mood={mood} size={fishSize} />
+        <div className="absolute inset-0">
+          <BrailleFish mood={mood} />
         </div>
 
         {showChrome && (
