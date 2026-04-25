@@ -55,8 +55,12 @@ export function Mardi({
   // ── Dialogue rotation ────────────────────────────────────────────────
   // On mood change: jump to a fresh line from that mood's pool.
   // While a mood lingers: rotate every ~6s so Mardi doesn't feel frozen.
-  const [lineIdx, setLineIdx] = useState(() => Math.floor(Math.random() * 5));
+  // SSR-safe: start at 0 so server + client agree, then randomise after mount.
+  const [lineIdx, setLineIdx] = useState(0);
   const moodRef = useRef(mood);
+  useEffect(() => {
+    setLineIdx(Math.floor(Math.random() * MARDI_LINES[moodRef.current].length));
+  }, []);
   useEffect(() => {
     if (moodRef.current !== mood) {
       moodRef.current = mood;
@@ -80,7 +84,15 @@ export function Mardi({
     <div className={`relative mx-auto w-full max-w-[420px] ${className}`}>
       <div className="relative aspect-square bg-ink-2 pixel-border braille-field-soft overflow-hidden">
         <div className="absolute inset-0">
-          <BrailleFish mood={mood} />
+          <BrailleFish
+            mood={mood}
+            inset={{
+              top: showChrome ? 0.09 : 0.04,
+              right: 0.04,
+              bottom: showCaption ? 0.22 : 0.04,
+              left: 0.04,
+            }}
+          />
         </div>
 
         {showChrome && (

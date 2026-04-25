@@ -2,19 +2,68 @@
 
 import { useEffect, useRef } from "react";
 import {
-  BAYER_4,
   BRAILLE_LAYOUT,
   MOOD_COLOR,
   type MardiMood,
 } from "./mardi-art";
+import {
+  buildMardiSprite,
+  type MardiSprite,
+  type MouthShape,
+  type PupilDir,
+} from "./mardi-sprite";
 
 export type { MardiMood } from "./mardi-art";
+
+// ── Per-mood face state ──────────────────────────────────────────────
+
+function pupilFor(m: MardiMood, t: number): PupilDir {
+  switch (m) {
+    case "idle":
+      // Drifts gently between centre and slightly-left.
+      return Math.sin(t * 0.4) > 0.6 ? "left" : "center";
+    case "summoned":
+      return "upRight";
+    case "thinking":
+      return Math.sin(t * 0.7) > 0 ? "up" : "upLeft";
+    case "success":
+      return "right";
+    case "error":
+      return "down";
+    case "sleeping":
+      return "center";
+  }
+}
+
+function mouthFor(
+  m: MardiMood,
+  t: number,
+  inReaction: boolean,
+  moodAge: number,
+): MouthShape {
+  if (m === "sleeping" && inReaction && moodAge < 0.30) return "yawn";
+  switch (m) {
+    case "idle":     return Math.sin(t * 0.55) > 0.4 ? "o" : "neutral";
+    case "summoned": return "o";
+    case "thinking": return Math.sin(t * 0.7) > 0 ? "o" : "neutral";
+    case "success":  return "smile";
+    case "error":    return "x";
+    case "sleeping": return "o";
+  }
+}
+
+
+/** Fractional insets (0..1) leaving breathing room around the character. */
+export type BrailleInset = {
+  top?: number;
+  right?: number;
+  bottom?: number;
+  left?: number;
+};
 
 type Props = {
   /** Current mood. Drives colour + motion character. */
   mood?: MardiMood;
-  /** Source image to sample. Default: the Mardi goldfish-in-a-bowl PNG. */
-  src?: string;
   /** Braille grid width. Dot grid is `cols*2` wide. */
   cols?: number;
   /** Braille grid height. Dot grid is `rows*4` tall. */
@@ -24,6 +73,12 @@ type Props = {
   className?: string;
   /** Optional palette override. */
   palette?: Partial<Record<MardiMood, string>>;
+  /**
+   * Padding between the character and the container edges, as fractions of
+   * the container's width/height. Lets callers reserve room for chrome or
+   * caption overlays. Defaults to a small symmetric inset on all sides.
+   */
+  inset?: BrailleInset;
 };
 
 type Bubble = {
@@ -35,40 +90,29 @@ type Bubble = {
   ttl: number;
 };
 
-type Sampled = {
-  /** 1-bit dots where the fish's warm-hued pixels live. Moves with bob + tail wave. */
-  fish: Uint8Array;
-  /** 1-bit dots for everything else — the bowl, water, lighting. Static. */
-  bowl: Uint8Array;
-  /** Auto-detected mouth position in dot coords — the rightmost fish pixel near centre height. */
-  mouthX: number;
-  mouthY: number;
-  /** Left edge of the fish in dot coords — used to localise the tail wave. */
-  fishMinX: number;
-  fishMaxX: number;
-};
-
 /**
  * BrailleFish — Mardi, as a living braille portrait.
  *
- * Samples a source PNG (default: the goldfish-in-a-fishbowl) into a dithered
- * dot grid, segments fish from bowl by hue, and animates only the fish layer:
- * the bowl stays put, Mardi swims inside it.
+ * The bowl, the fish, and its swim cycle are generated procedurally as dot
+ * arrays; the renderer composes a static bowl layer with one of N pre-built
+ * fish frames (selected by tail phase), then applies bob, blink, glitch and
+ * mouth-bubbles on top before packing dots into braille glyphs.
  *
  * Canvas fills its parent container, which should be square.
- *
- * Reusable: pass a different `src` (and adjust palette if you like) to render
- * any other creature in the same style.
  */
 export function BrailleFish({
   mood = "idle",
-  src = "/assets/MardiFish.png",
   cols = 56,
   rows = 28,
   glow = true,
   className = "",
   palette,
+  inset,
 }: Props) {
+  const insetTop = inset?.top ?? 0.04;
+  const insetRight = inset?.right ?? 0.04;
+  const insetBottom = inset?.bottom ?? 0.04;
+  const insetLeft = inset?.left ?? 0.04;
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
 
@@ -84,104 +128,12 @@ export function BrailleFish({
     }
   }, [mood]);
 
-  const sampledRef = useRef<Sampled | null>(null);
+  const spriteRef = useRef<MardiSprite | null>(null);
 
-  // ── Sample + segment the PNG once ───────────────────────────────────
+  // ── Build sprite (bowl + fish frames) ────────────────────────────────
   useEffect(() => {
-    const dotCols = cols * 2;
-    const dotRows = rows * 4;
-
-    let cancelled = false;
-    const img = new Image();
-    img.crossOrigin = "anonymous";
-    img.src = src;
-
-    img.onload = () => {
-      if (cancelled) return;
-      const off = document.createElement("canvas");
-      off.width = img.naturalWidth;
-      off.height = img.naturalHeight;
-      const octx = off.getContext("2d", { willReadFrequently: true });
-      if (!octx) return;
-      octx.drawImage(img, 0, 0);
-      const { data, width: W, height: H } = octx.getImageData(
-        0, 0, img.naturalWidth, img.naturalHeight,
-      );
-
-      const fish = new Uint8Array(dotCols * dotRows);
-      const bowl = new Uint8Array(dotCols * dotRows);
-
-      let mouthX = 0, mouthY = 0, mouthScore = -Infinity;
-      let fishMinX = dotCols, fishMaxX = 0;
-
-      // For each dot in the grid, average the source block it covers, then
-      // threshold against Bayer 4×4. Classify each lit dot as fish (warm,
-      // high-chroma) or bowl (everything else).
-      const blockW = W / dotCols;
-      const blockH = H / dotRows;
-
-      for (let dy = 0; dy < dotRows; dy++) {
-        for (let dx = 0; dx < dotCols; dx++) {
-          const sx0 = Math.floor(dx * blockW);
-          const sy0 = Math.floor(dy * blockH);
-          const sx1 = Math.min(W, Math.ceil((dx + 1) * blockW));
-          const sy1 = Math.min(H, Math.ceil((dy + 1) * blockH));
-
-          let rSum = 0, gSum = 0, bSum = 0, aSum = 0, count = 0;
-          for (let y = sy0; y < sy1; y++) {
-            for (let x = sx0; x < sx1; x++) {
-              const o = (y * W + x) * 4;
-              rSum += data[o];
-              gSum += data[o + 1];
-              bSum += data[o + 2];
-              aSum += data[o + 3];
-              count++;
-            }
-          }
-          if (count === 0) continue;
-          const r = rSum / count;
-          const g = gSum / count;
-          const b = bSum / count;
-          const a = aSum / count;
-          if (a < 30) continue;
-
-          // Luminance + a gentle gamma to lift mid-tones (the bowl has a
-          // lot of darker glass that we want represented).
-          const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
-          const lifted = Math.pow(lum, 0.72);
-          const threshold = BAYER_4[dy & 3][dx & 3];
-          if (lifted <= threshold) continue;
-
-          // Fish: warm-dominant (goldfish body = orange/gold, fins = pink).
-          const warmScore = (r - b) + Math.max(0, r - g);
-          const isFish = warmScore > 50 && r > 120;
-          // Exclude the very bright pink bowl RIM by requiring the green
-          // channel to be reasonable (bowl rim is high-R high-B low-G).
-          const bowlRim = r > 200 && b > 150 && g < 90;
-          if (isFish && !bowlRim) {
-            fish[dy * dotCols + dx] = 1;
-            if (dx < fishMinX) fishMinX = dx;
-            if (dx > fishMaxX) fishMaxX = dx;
-            // Score rightmost fish pixels near mid-height highest — that's the mouth.
-            const score = dx * 3 - Math.abs(dy - dotRows * 0.48) * 4;
-            if (score > mouthScore) {
-              mouthScore = score;
-              mouthX = dx;
-              mouthY = dy;
-            }
-          } else {
-            bowl[dy * dotCols + dx] = 1;
-          }
-        }
-      }
-
-      sampledRef.current = { fish, bowl, mouthX, mouthY, fishMinX, fishMaxX };
-    };
-
-    return () => {
-      cancelled = true;
-    };
-  }, [src, cols, rows]);
+    spriteRef.current = buildMardiSprite(cols * 2, rows * 4);
+  }, [cols, rows]);
 
   // ── Render loop ─────────────────────────────────────────────────────
   useEffect(() => {
@@ -195,7 +147,17 @@ export function BrailleFish({
     const dotRows = rows * 4;
     const composed = new Uint8Array(dotCols * dotRows);
 
+    const FONT = `"Departure Mono", ui-monospace, Menlo, monospace`;
+
+    // Rendered grid metrics, recomputed on resize. The grid is a square
+    // fitted into the container's safe-area (container minus insets); the
+    // character is drawn cell-by-cell so glyph advance can never clip the
+    // right edge the way batched row draws do.
     let cssW = 0, cssH = 0;
+    let boxX = 0, boxY = 0;
+    let charW = 0, charH = 0;
+    let fontPx = 0;
+
     const resize = () => {
       const r = wrap.getBoundingClientRect();
       cssW = Math.max(1, r.width);
@@ -206,8 +168,36 @@ export function BrailleFish({
       canvas.style.width = `${cssW}px`;
       canvas.style.height = `${cssH}px`;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+      const padL = cssW * insetLeft;
+      const padR = cssW * insetRight;
+      const padT = cssH * insetTop;
+      const padB = cssH * insetBottom;
+      const availW = Math.max(1, cssW - padL - padR);
+      const availH = Math.max(1, cssH - padT - padB);
+      // Dot grid is square (cols*2 === rows*4 by default), so fit a square.
+      const boxSide = Math.min(availW, availH);
+      boxX = padL + (availW - boxSide) / 2;
+      boxY = padT + (availH - boxSide) / 2;
+      charW = boxSide / cols;
+      charH = boxSide / rows;
+
+      // Pick the largest fontPx that still fits a glyph inside one cell.
+      // Measured once per resize — the font cascade is stable for braille.
+      const refPx = 100;
+      ctx.font = `${refPx}px ${FONT}`;
+      const m = ctx.measureText("⣿");
+      const refAdvance = m.width || refPx * 0.6;
+      const refHeight =
+        (m.fontBoundingBoxAscent ?? refPx * 0.8) +
+        (m.fontBoundingBoxDescent ?? refPx * 0.2);
+      const fontPxByW = (refPx * charW) / refAdvance;
+      const fontPxByH = (refPx * charH) / refHeight;
+      fontPx = Math.min(fontPxByW, fontPxByH);
     };
     resize();
+    // Web fonts can land after first measure — remeasure once they're ready.
+    document.fonts?.ready?.then(() => resize()).catch(() => {});
     const ro = new ResizeObserver(resize);
     ro.observe(wrap);
     window.addEventListener("resize", resize);
@@ -258,7 +248,11 @@ export function BrailleFish({
     const bubbles: Bubble[] = [];
     let prevM: MardiMood = moodRef.current;
 
-    const BUBBLE_GLYPHS = ["⠂", "⠄", "⡀", "⠁", "⠈", "⠐"];
+    // Bubble lifecycle: starts as a single dot from the mouth, grows as it
+    // rises (denoting expansion at lower pressure / "filling out"), then
+    // fades to nothing. Picked by age progression so each bubble grows
+    // smoothly rather than flickering between sizes.
+    const BUBBLE_GLYPHS = ["⠂", "⠆", "⠒", "⠶", "⠿"];
 
     const draw = (now: number) => {
       raf = requestAnimationFrame(draw);
@@ -267,22 +261,53 @@ export function BrailleFish({
       const dt = Math.min(0.1, (now - lastFrame) / 1000);
       lastFrame = now;
 
-      const sampled = sampledRef.current;
-      if (!sampled) {
+      const sprite = spriteRef.current;
+      if (!sprite) {
         ctx.clearRect(0, 0, cssW, cssH);
         return;
       }
 
       const t = (now - start) / 1000;
       const m = moodRef.current;
+      const moodAge = (now - moodChangedAtRef.current) / 1000;
+      const inReaction = moodAge < 0.5;
 
       // ── Motion parameters per mood ─────────────────────────────────
       const bobFreq = m === "error" ? 8 : m === "summoned" ? 1.8 : m === "sleeping" ? 0.4 : 1.2;
       const bobAmp = reduced ? 0 : m === "sleeping" ? 1 : m === "error" ? 0.8 : m === "summoned" ? 1.4 : 2.2;
-      const bob = Math.round(Math.sin(t * bobFreq) * bobAmp);
+      let bob = Math.round(Math.sin(t * bobFreq) * bobAmp);
       const tailFreq = m === "thinking" ? 1.4 : m === "summoned" ? 4.2 : m === "sleeping" ? 0.6 : 2.8;
-      const tailPhase = reduced ? 0 : Math.sin(t * tailFreq);
-      const jitter = !reduced && m === "error" ? Math.round(Math.sin(t * 38) * 1.5) : 0;
+
+      const tailIdx = reduced
+        ? 0
+        : Math.floor(((t * tailFreq) / (Math.PI * 2)) * sprite.tailFrames.length) % sprite.tailFrames.length;
+      const tailFrame = sprite.tailFrames[(tailIdx + sprite.tailFrames.length) % sprite.tailFrames.length];
+
+      const pecFreq = m === "summoned" ? 5.0 : m === "thinking" ? 1.4 : m === "sleeping" ? 0.5 : 3.5;
+      const pecIdx = reduced
+        ? 0
+        : Math.floor(((t * pecFreq) / (Math.PI * 2)) * sprite.pectoralFrames.length) % sprite.pectoralFrames.length;
+      const pectoralFrame = sprite.pectoralFrames[(pecIdx + sprite.pectoralFrames.length) % sprite.pectoralFrames.length];
+
+      let jitter = !reduced && m === "error" ? Math.round(Math.sin(t * 38) * 1.5) : 0;
+
+      // One-shot mood-entry reactions (first 500ms after a transition).
+      if (inReaction && !reduced) {
+        const k = Math.sin((moodAge / 0.5) * Math.PI); // 0 → 1 → 0
+        switch (m) {
+          case "summoned":
+            bob -= Math.round(k * 3); // dart up then settle
+            break;
+          case "error":
+            jitter += Math.round(Math.sin(moodAge * 60) * 2 * k);
+            break;
+          case "success":
+            // wink handled below by forcing blink early
+            break;
+          default:
+            break;
+        }
+      }
 
       // ── Blink ──────────────────────────────────────────────────────
       if (t > nextBlink && blinkUntil === 0 && m !== "sleeping") {
@@ -306,8 +331,8 @@ export function BrailleFish({
         const count = m === "success" ? 9 : m === "summoned" ? 4 : 0;
         for (let i = 0; i < count; i++) {
           bubbles.push({
-            x: sampled.mouthX + (Math.random() - 0.5) * 4,
-            y: sampled.mouthY + bob + (Math.random() - 0.5) * 2,
+            x: sprite.mouthBubbleX + (Math.random() - 0.5) * 4,
+            y: sprite.mouthBubbleY + bob + (Math.random() - 0.5) * 2,
             vx: (Math.random() - 0.5) * 6,
             vy: -4 - Math.random() * 3,
             age: 0,
@@ -324,8 +349,8 @@ export function BrailleFish({
                              0.9;
         if (Math.random() < rate * dt) {
           bubbles.push({
-            x: sampled.mouthX,
-            y: sampled.mouthY + bob,
+            x: sprite.mouthBubbleX,
+            y: sprite.mouthBubbleY + bob,
             vx: (Math.random() - 0.5) * 2,
             vy: -2.5 - Math.random() * 1.2,
             age: 0,
@@ -341,48 +366,111 @@ export function BrailleFish({
         if (b.age >= b.ttl || b.y < -2) bubbles.splice(i, 1);
       }
 
-      // ── Compose: bowl (static) + fish (bob + tail wave + jitter) ──
+      // ── Compose: bowl → opaque body → tail/pectoral overlays → face ──
       composed.fill(0);
-      composed.set(sampled.bowl);
+      composed.set(sprite.bowl);
 
-      const fishWidth = Math.max(1, sampled.fishMaxX - sampled.fishMinX);
-      // Tail wave acts on the leftmost ~45% of the fish's own bounding box.
-      for (let dy = 0; dy < dotRows; dy++) {
-        for (let dx = 0; dx < dotCols; dx++) {
-          if (!sampled.fish[dy * dotCols + dx]) continue;
-          const normX = (dx - sampled.fishMinX) / fishWidth; // 0 at tail, 1 at mouth
-          const tailFactor = Math.max(0, 1 - normX / 0.45);
-          const wave = Math.round(tailPhase * 2 * tailFactor);
-          const tx = dx + jitter;
-          const ty = dy + bob + wave;
-          if (tx < 0 || tx >= dotCols || ty < 0 || ty >= dotRows) continue;
+      const fishOriginX = sprite.fishX + jitter;
+      const fishOriginY = sprite.fishY + bob;
+      const fW = sprite.fishW;
+      const fH = sprite.fishH;
+
+      // Tail (translucent — drawn first so the body overlaps the tail base).
+      for (let fy = 0; fy < fH; fy++) {
+        const ty = fishOriginY + fy;
+        if (ty < 0 || ty >= dotRows) continue;
+        for (let fx = 0; fx < fW; fx++) {
+          if (!tailFrame[fy * fW + fx]) continue;
+          const tx = fishOriginX + fx;
+          if (tx < 0 || tx >= dotCols) continue;
           composed[ty * dotCols + tx] = 1;
         }
       }
 
-      // Blink / sleep: clear a short strip above the mouth, at fish eye height.
-      if (blinking || m === "sleeping") {
-        const eyeX = sampled.mouthX - Math.round(dotCols * 0.08);
-        const eyeY = sampled.mouthY + bob - Math.round(dotRows * 0.05);
-        for (let dy = -1; dy <= 1; dy++) {
-          for (let dx = -2; dx <= 2; dx++) {
-            const ex = eyeX + dx;
-            const ey = eyeY + dy;
-            if (ex < 0 || ex >= dotCols || ey < 0 || ey >= dotRows) continue;
-            composed[ey * dotCols + ex] = dy === 0 ? 1 : 0;
+      // Body (opaque — mask CLEARS bowl under fish silhouette, base sets pattern).
+      for (let fy = 0; fy < fH; fy++) {
+        const ty = fishOriginY + fy;
+        if (ty < 0 || ty >= dotRows) continue;
+        for (let fx = 0; fx < fW; fx++) {
+          if (!sprite.bodyMask[fy * fW + fx]) continue;
+          const tx = fishOriginX + fx;
+          if (tx < 0 || tx >= dotCols) continue;
+          composed[ty * dotCols + tx] = sprite.bodyBase[fy * fW + fx];
+        }
+      }
+
+      // Pectoral fin (translucent — drawn over belly).
+      for (let fy = 0; fy < fH; fy++) {
+        const ty = fishOriginY + fy;
+        if (ty < 0 || ty >= dotRows) continue;
+        for (let fx = 0; fx < fW; fx++) {
+          if (!pectoralFrame[fy * fW + fx]) continue;
+          const tx = fishOriginX + fx;
+          if (tx < 0 || tx >= dotCols) continue;
+          composed[ty * dotCols + tx] = 1;
+        }
+      }
+
+      // ── Face: pupil ─────────────────────────────────────────────────
+      const eyeClosed =
+        blinking ||
+        m === "sleeping" ||
+        (m === "success" && inReaction && moodAge < 0.18); // wink on success entry
+
+      if (!eyeClosed) {
+        const dir = pupilFor(m, t);
+        const [pdx, pdy] = sprite.pupilOffset[dir];
+        // Add micro-saccade — tiny 1-dot jitter every few seconds.
+        const sacc = Math.floor(t * 0.3) % 7 === 0 ? Math.sign(Math.sin(t * 11)) : 0;
+        const px = fishOriginX + sprite.eyeX + pdx + sacc;
+        const py = fishOriginY + sprite.eyeY + pdy;
+        if (px >= 0 && px < dotCols && py >= 0 && py < dotRows) {
+          composed[py * dotCols + px] = 1;
+        }
+      } else {
+        // Eyelid line through eye centre — spans the full eye width.
+        const eGX = fishOriginX + sprite.eyeX;
+        const eGY = fishOriginY + sprite.eyeY;
+        for (let dx = -3; dx <= 3; dx++) {
+          const ex = eGX + dx;
+          if (ex >= 0 && ex < dotCols && eGY >= 0 && eGY < dotRows) {
+            composed[eGY * dotCols + ex] = 1;
           }
+        }
+      }
+
+      // ── Face: mouth ─────────────────────────────────────────────────
+      const mouthShape = mouthFor(m, t, inReaction, moodAge);
+      const mp = sprite.mouthShapes[mouthShape];
+      for (let my = 0; my < sprite.mouthShapeH; my++) {
+        const ty = fishOriginY + sprite.mouthY + my;
+        if (ty < 0 || ty >= dotRows) continue;
+        for (let mx = 0; mx < sprite.mouthShapeW; mx++) {
+          if (!mp[my * sprite.mouthShapeW + mx]) continue;
+          const tx = fishOriginX + sprite.mouthX + mx;
+          if (tx < 0 || tx >= dotCols) continue;
+          composed[ty * dotCols + tx] = 1;
+        }
+      }
+
+      // ── Face: blush dots on success ─────────────────────────────────
+      if (m === "success") {
+        const bx = fishOriginX + sprite.blushX;
+        const by = fishOriginY + sprite.blushY;
+        if (bx >= 0 && bx < dotCols && by >= 0 && by < dotRows) {
+          composed[by * dotCols + bx] = 1;
+        }
+        if (bx + 6 >= 0 && bx + 6 < dotCols) {
+          composed[by * dotCols + (bx + 6)] = 1;
         }
       }
 
       // ── Paint ─────────────────────────────────────────────────────
       ctx.clearRect(0, 0, cssW, cssH);
 
-      const charW = cssW / cols;
-      const charH = cssH / rows;
-      const fontPx = charH * 0.98;
-      ctx.font = `${fontPx}px "Departure Mono", ui-monospace, Menlo, monospace`;
-      ctx.textBaseline = "top";
-      ctx.textAlign = "left";
+      ctx.font = `${fontPx}px ${FONT}`;
+      ctx.textBaseline = "middle";
+      ctx.textAlign = "center";
 
       // Mood colour with a 300ms cross-fade.
       const elapsed = (now - moodChangedAtRef.current) / 300;
@@ -394,8 +482,10 @@ export function BrailleFish({
       }
       ctx.fillStyle = color;
 
+      // Per-cell draw at cell centres — the glyph's own advance metric is
+      // irrelevant because we position each character explicitly.
       for (let row = 0; row < rows; row++) {
-        let line = "";
+        const cy = boxY + (row + 0.5) * charH;
         for (let col = 0; col < cols; col++) {
           let cp = 0x2800;
           for (const [dc, dr, bit] of BRAILLE_LAYOUT) {
@@ -406,21 +496,28 @@ export function BrailleFish({
               if (composed[sy * dotCols + sx]) cp |= bit;
             }
           }
-          line += String.fromCharCode(cp);
+          if (cp === 0x2800) continue;
+          ctx.fillText(String.fromCharCode(cp), boxX + (col + 0.5) * charW, cy);
         }
-        ctx.fillText(line, 0, row * charH);
       }
 
       // ── Overlays ──────────────────────────────────────────────────
       for (const b of bubbles) {
         const p = b.age / b.ttl;
-        const alpha = p > 0.75 ? Math.max(0, 1 - (p - 0.75) / 0.25) : 0.95;
+        const alpha = p > 0.75 ? Math.max(0, 1 - (p - 0.75) / 0.25) : 1;
         const col = Math.floor(b.x / 2);
         const row = Math.floor(b.y / 4);
         if (row < 0 || row >= rows || col < 0 || col >= cols) continue;
         ctx.globalAlpha = alpha;
-        const gi = Math.abs(Math.floor(b.age * 7 + (b.vx + 3))) % BUBBLE_GLYPHS.length;
-        ctx.fillText(BUBBLE_GLYPHS[gi], col * charW, row * charH);
+        const gi = Math.min(
+          BUBBLE_GLYPHS.length - 1,
+          Math.floor(p * BUBBLE_GLYPHS.length),
+        );
+        ctx.fillText(
+          BUBBLE_GLYPHS[gi],
+          boxX + (col + 0.5) * charW,
+          boxY + (row + 0.5) * charH,
+        );
       }
       ctx.globalAlpha = 1;
 
@@ -432,12 +529,12 @@ export function BrailleFish({
             phase > 0.8  ? Math.max(0, 1 - (phase - 0.8) / 0.2) :
                            1;
           ctx.globalAlpha = fade * 0.75;
-          const zxDot = sampled.mouthX - 18 + i * 4 + phase * 10;
-          const zyDot = sampled.mouthY - 12 - phase * 20;
+          const zxDot = sprite.mouthX - 18 + i * 4 + phase * 10;
+          const zyDot = sprite.mouthY - 12 - phase * 20;
           ctx.fillText(
             i % 2 === 0 ? "z" : "Z",
-            (zxDot / 2) * charW,
-            (zyDot / 4) * charH,
+            boxX + (zxDot / 2 + 0.5) * charW,
+            boxY + (zyDot / 4 + 0.5) * charH,
           );
         }
         ctx.globalAlpha = 1;
@@ -446,7 +543,11 @@ export function BrailleFish({
       if (!reduced) {
         const on = Math.floor(t * 1.6) % 2 === 0;
         ctx.globalAlpha = on ? 0.55 : 0.15;
-        ctx.fillText("⠁", (cols - 1) * charW, (rows - 1) * charH);
+        ctx.fillText(
+          "⠁",
+          boxX + (cols - 0.5) * charW,
+          boxY + (rows - 0.5) * charH,
+        );
         ctx.globalAlpha = 1;
       }
     };
@@ -460,7 +561,7 @@ export function BrailleFish({
       window.removeEventListener("resize", resize);
       mq.removeEventListener?.("change", onMQ);
     };
-  }, [cols, rows, palette]);
+  }, [cols, rows, palette, insetTop, insetRight, insetBottom, insetLeft]);
 
   const currentColor = palette?.[mood] ?? MOOD_COLOR[mood];
 

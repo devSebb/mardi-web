@@ -57,7 +57,11 @@
 }
 
 /* ── Base ─────────────────────────────────────────────────────────── */
-html, body { background: var(--ink); color: var(--bone); }
+html, body {
+  background: var(--ink);
+  color: var(--bone);
+  overflow-x: clip;
+}
 
 body {
   font-family: var(--font-mono);
