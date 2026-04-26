@@ -1,20 +1,9 @@
 import { ImageResponse } from "next/og";
-import { FISH_ART } from "./_og/fish-art";
 
 export const runtime = "edge";
 export const alt = "MARDI — a second brain that lives in the corner of your screen.";
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
-
-/**
- * Social-share card. Two columns:
- *   left  — agent header, headline, tagline, quote
- *   right — Mardi rendered as baked-in braille art (see scripts/gen-fish-art.mjs)
- *
- * Everything is static text at request time — Satori can't run Canvas, so the
- * fish is pre-sampled at build time into /app/_og/fish-art.ts and rendered
- * here as plain monospace braille glyphs.
- */
 export default async function OGImage() {
   return new ImageResponse(
     (
@@ -55,14 +44,13 @@ export default async function OGImage() {
             .join("\n")}
         </div>
 
-        {/* ── Left column: copy ─────────────────────────── */}
+        {/* ── Copy ─────────────────────────────────────── */}
         <div
           style={{
             flex: 1,
             display: "flex",
             flexDirection: "column",
             zIndex: 1,
-            paddingRight: 24,
           }}
         >
           {/* Agent header */}
@@ -152,102 +140,6 @@ export default async function OGImage() {
           </div>
         </div>
 
-        {/* ── Right column: the fish ────────────────────── */}
-        <div
-          style={{
-            width: 440,
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 1,
-            position: "relative",
-          }}
-        >
-          {/* Soft pink glow behind the fish */}
-          <div
-            style={{
-              position: "absolute",
-              top: "22%",
-              bottom: "22%",
-              left: "6%",
-              right: "6%",
-              background:
-                "radial-gradient(closest-side, rgba(255,46,204,0.32) 0%, rgba(255,46,204,0.08) 45%, transparent 80%)",
-              display: "flex",
-            }}
-          />
-
-          {/* Chrome: top row */}
-          <div
-            style={{
-              position: "absolute",
-              top: 12,
-              left: 16,
-              right: 16,
-              display: "flex",
-              justifyContent: "space-between",
-              fontSize: 12,
-              letterSpacing: "0.28em",
-              textTransform: "uppercase",
-            }}
-          >
-            <span style={{ color: "#6b6860", display: "flex" }}>
-              ⣿⣿ fishbowl
-            </span>
-            <span style={{ color: "#ff2ecc", display: "flex" }}>
-              · summoned
-            </span>
-          </div>
-
-          {/* The fish art */}
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              fontFamily: "ui-monospace, Menlo, monospace",
-              fontSize: 16,
-              lineHeight: "16px",
-              color: "#ff2ecc",
-              whiteSpace: "pre",
-              textAlign: "center",
-              letterSpacing: "0",
-            }}
-          >
-            {FISH_ART.map((line, i) => (
-              <span
-                key={i}
-                style={{
-                  display: "flex",
-                  whiteSpace: "pre",
-                  letterSpacing: "0",
-                }}
-              >
-                {line}
-              </span>
-            ))}
-          </div>
-
-          {/* Chrome: bottom row */}
-          <div
-            style={{
-              position: "absolute",
-              bottom: 12,
-              left: 16,
-              right: 16,
-              display: "flex",
-              justifyContent: "space-between",
-              fontSize: 13,
-              color: "#b7b3aa",
-              letterSpacing: "0.08em",
-            }}
-          >
-            <span style={{ display: "flex" }}>› save something?</span>
-            <span style={{ color: "#ff2ecc", letterSpacing: "0.28em", display: "flex" }}>
-              ⣿⣿⣿⣿⣿⣿⣿⣿
-            </span>
-          </div>
-        </div>
       </div>
     ),
     { ...size }
